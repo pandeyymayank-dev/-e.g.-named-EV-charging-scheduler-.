@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EV Charging Smart Scheduler - Dispatch Control Room</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <!-- Chart.js from cdnjs -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+</head>
+<body>
+  <!-- Global Error Notification Banner -->
+  <div id="errorBanner" class="error-banner">
+    <div class="error-banner-content">
+      <span style="font-size: 1.1rem;">⚠️</span>
+      <span id="errorMessage">An unexpected error occurred.</span>
+    </div>
+    <button class="error-close" onclick="dismissError()">✕</button>
+  </div>
+
+  <!-- Header -->
+  <header class="control-header">
+    <div class="brand-section">
+      <div class="brand-icon">⚡</div>
+      <div>
+        <div class="brand-title">EV Charging Smart Scheduler // Control Room</div>
+        <div class="brand-subtitle">SYSTEM STATE // LEAST SLACK FIRST SCHEDULER</div>
+      </div>
+    </div>
+
+    <div class="header-controls">
+      <!-- Editable Capacity in Header -->
+      <div class="capacity-editor-box">
+        <label for="stationCapacityInput">Station Capacity:</label>
+        <div class="capacity-input-wrap">
+          <input type="number" id="stationCapacityInput" step="1" min="0" value="20" title="Click to edit capacity and press Enter or blur">
+          <span class="capacity-unit">kW</span>
+        </div>
+        <button id="saveCapacityBtn" class="btn btn-secondary" style="padding: 3px 8px; font-size: 0.72rem;" onclick="saveStationCapacity()">Save</button>
+      </div>
+
+      <div class="telemetry-status">
+        <div class="pulsing-dot"></div>
+        <span>Grid Online</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Control Room Grid -->
+  <main class="control-grid">
+    <!-- Left Column: Add EV Form, Actions, & Queue List -->
+    <section class="left-column">
+      <!-- Actions Group -->
+      <div class="btn-group-row">
+        <button id="runScheduleBtn" class="btn btn-primary" onclick="triggerRunScheduler()">
+          <span>▶</span> Run
+        </button>
+        <button id="simulateBtn" class="btn btn-simulate" onclick="triggerSimulateEvs(20)">
+          <span>⚡</span> Simulate 20 EVs
+        </button>
+        <button id="resetBenchmarkBtn" class="btn btn-secondary" onclick="triggerResetBenchmark()">
+          <span>↺</span> Reset (4-EV)
+        </button>
+      </div>
+
+      <!-- Add EV Form Panel -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Add Vehicle to Queue</span>
+          <span class="panel-badge">INPUT TELEMETRY</span>
+        </div>
+        <form id="addEvForm" onsubmit="handleAddEv(event)">
+          <!-- Indian EV Quick Presets -->
+          <div style="margin-bottom: 12px;">
+            <label class="input-label" style="display: block; margin-bottom: 6px;">Indian EV Presets (Click to autofill):</label>
+            <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+              <button type="button" class="preset-chip" onclick="applyPreset('Tata Nexon EV', 7.2, 2.5)">Nexon EV (7.2kW)</button>
+              <button type="button" class="preset-chip" onclick="applyPreset('Tata Punch EV', 7.2, 2.0)">Punch EV (7.2kW)</button>
+              <button type="button" class="preset-chip" onclick="applyPreset('Mahindra XUV400', 7.2, 3.0)">XUV400 (7.2kW)</button>
+              <button type="button" class="preset-chip" onclick="applyPreset('MG ZS EV', 7.4, 3.0)">MG ZS EV (7.4kW)</button>
+              <button type="button" class="preset-chip" onclick="applyPreset('Tata Tiago EV', 3.3, 2.0)">Tiago EV (3.3kW)</button>
+              <button type="button" class="preset-chip" onclick="applyPreset('MG Comet EV', 3.3, 1.5)">Comet EV (3.3kW)</button>
+            </div>
+          </div>
+
+          <div class="form-grid">
+            <div class="input-group form-full">
+              <label class="input-label" for="evLabel">Vehicle Model / ID</label>
+              <input type="text" id="evLabel" class="form-control" placeholder="e.g. Tata Nexon EV, Mahindra XUV400" required>
+            </div>
+            <div class="input-group">
+              <label class="input-label" for="evArrival">Arrival Hour (0-23)</label>
+              <input type="number" id="evArrival" class="form-control" step="0.5" min="0" max="48" placeholder="18.0" required>
+            </div>
+            <div class="input-group">
+              <label class="input-label" for="evDeadline">Deadline Hour</label>
+              <input type="number" id="evDeadline" class="form-control" step="0.5" min="0" max="48" placeholder="7.0" required>
+            </div>
+            <div class="input-group">
+              <label class="input-label" for="evHours">Hours Needed</label>
+              <input type="number" id="evHours" class="form-control" step="0.5" min="0.5" max="24" placeholder="2.5" required>
+            </div>
+            <div class="input-group">
+              <label class="input-label" for="evPower">Power Demand</label>
+              <select id="evPower" class="form-control" required>
+                <option value="3.3">3.3 kW (Slow AC - Tiago / Comet / 15A Plug)</option>
+                <option value="7.2" selected>7.2 kW (Type-2 AC Wallbox - Nexon / Punch)</option>
+                <option value="7.4">7.4 kW (Type-2 AC - MG ZS / XUV400)</option>
+                <option value="11.0">11.0 kW (3-Phase AC - Ioniq 5 / BYD Atto 3)</option>
+                <option value="22.0">22.0 kW (High Capacity 3-Phase AC)</option>
+                <option value="30.0">30.0 kW (DC Fast Charger - Tata Power / Jio-bp)</option>
+                <option value="50.0">50.0 kW (CCS2 Highway DC Fast Charger)</option>
+                <option value="60.0">60.0 kW (High Speed DC Fast Charger)</option>
+              </select>
+            </div>
+          </div>
+          <button type="submit" class="btn btn-secondary" style="width: 100%;">
+            + Dispatch Vehicle Request
+          </button>
+        </form>
+      </div>
+
+      <!-- EV Queue List Panel -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Active EV Queue</span>
+          <span id="queueCountBadge" class="panel-badge">0 EVs</span>
+        </div>
+        <div class="table-wrap">
+          <table class="telemetry-table" id="queueTable">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Vehicle</th>
+                <th>Arr → Ddl</th>
+                <th>Req</th>
+                <th>Power</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="queueTableBody">
+              <tr>
+                <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 20px;">
+                  Queue empty. Add an EV or click Reset.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Right Column: Stats, Grouped Bar Chart, Per-Vehicle Table, Decision Log -->
+    <section class="right-column">
+      <!-- Three Stat Cards -->
+      <div class="stats-row">
+        <!-- 1. Peak Reduction % -->
+        <div class="stat-card stat-card-cyan">
+          <div class="stat-title">Peak Load Reduction</div>
+          <div class="stat-value" id="statPeakReduction" style="color: var(--accent-cyan);">--%</div>
+          <div class="stat-desc" id="statPeakDetails">Uncontrolled vs Scheduled Peak</div>
+        </div>
+
+        <!-- 2. Deadlines Met -->
+        <div class="stat-card stat-card-emerald">
+          <div class="stat-title">Deadlines Fulfilled</div>
+          <div class="stat-value" id="statDeadlinesMet" style="color: var(--accent-emerald);">--/--</div>
+          <div class="stat-desc" id="statDeadlinesDetails">0% Fulfillment Rate</div>
+        </div>
+
+        <!-- 3. Total Cost in Rupees -->
+        <div class="stat-card stat-card-amber">
+          <div class="stat-title">Total Energy Cost (₹)</div>
+          <div class="stat-value" id="statEstimatedCost" style="color: var(--accent-amber);">₹0.00</div>
+          <div class="stat-desc" id="statCostDetails">Uncontrolled: ₹0.00 | Savings: ₹0.00</div>
+        </div>
+      </div>
+
+      <!-- Grouped Bar Chart Panel -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Hourly Grid Load Profile (kW)</span>
+          <span class="panel-badge">TELEMETRY CHART</span>
+        </div>
+        <div class="chart-container">
+          <canvas id="loadChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Per-Vehicle Schedule Table Panel -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Vehicle Charging Assignments</span>
+          <span class="panel-badge">LSF ALLOCATION</span>
+        </div>
+        <div class="table-wrap">
+          <table class="telemetry-table" id="scheduleTable">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Vehicle</th>
+                <th>Window</th>
+                <th>Energy Needed</th>
+                <th>Assigned Charging Slots</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="scheduleTableBody">
+              <tr>
+                <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 20px;">
+                  Run scheduler to compute slot allocations.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Scheduler Telemetry Log Panel -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Scheduler Decision Log</span>
+          <span class="panel-badge">LSF LOG STREAM</span>
+        </div>
+        <div class="terminal-box" id="terminalLog">
+          <div class="log-line">
+            <span class="log-tag-info">[SYSTEM]</span>
+            <span class="log-text">Telemetry terminal initialized. Ready for scheduling dispatch.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- App Logic -->
+  <script src="app.js"></script>
+</body>
+</html>
